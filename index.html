@@ -1,0 +1,296 @@
+
+<body bgcolor=#e6d0bd>
+<style>
+   canvas { transform: translate(200px, 200px) scale(2); }
+</style>
+<select id="room_choice">
+  <option value="example3D">Ray Tracing</option>
+</select>
+<dev id=buttons>
+</dev>
+
+<p>
+
+<div id=codeWindow style='z-index:-1;position:absolute;left:8;top:36;'>
+   <textArea
+      id=codeText rows=28 cols=54
+      style='outline-width:0;border-style:none;
+             background:#00000080;color:#fff;outline:#000;
+             font-family:Courier;font-size:24px;white-space:pre-wrap'
+      onkeydown='this.onKeyDown(event)'
+      onkeyup  ='this.onKeyUp  (event)'
+   ></textArea>
+</div>
+
+<div id=canvasWindow style='z-index:0;position:absolute;left:8;top:36;'>
+</div>
+
+<script>
+   canvasWindow.innerHTML = '<canvas id=myCanvas width=400 height=400></canvas>'
+</script>
+
+<div style='z-index:2;position:absolute;left:844;top:36;'>
+   <!-- pulled from https://www.w3schools.com/howto/howto_css_switch.asp -->
+   <style>
+      .bolded {
+         position: relative;
+         font-size: 40;
+         font-weight:bold;
+         padding: 10px;
+      }
+      .lab {
+         position: relative;
+         display: inline-block;
+         margin: auto;
+         font-size: 25;
+      }
+      .switch {
+        position: relative;
+        display: inline-block;
+        vertical-align: top;
+        width: 60px;
+        height: 34px;
+      }
+      
+      .switch input { 
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        -webkit-transition: .4s;
+        transition: .4s;
+      }
+      
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 26px;
+        width: 26px;
+        left: 4px;
+        bottom: 4px;
+        background-color: white;
+        -webkit-transition: .4s;
+        transition: .4s;
+      }
+      
+      input:checked + .slider {
+        background-color: #2196F3;
+      }
+      
+      input:focus + .slider {
+        box-shadow: 0 0 1px #2196F3;
+      }
+      
+      input:checked + .slider:before {
+        -webkit-transform: translateX(26px);
+        -ms-transform: translateX(26px);
+        transform: translateX(26px);
+      }
+      
+      /* Rounded sliders */
+      .slider.round {
+        border-radius: 34px;
+      }
+      
+      .slider.round:before {
+        border-radius: 50%;
+      }
+   </style>
+   <font face='helvetica' size=6 color=black>
+   <div id=descriptionWindow></div>
+   </font>
+</div>
+
+<div id=htmlWindow style='z-index:3;position:absolute;left:8;top:36;'>
+</div>
+
+<div id=errorWindow style='z-index:3;position:absolute;left:12;top:40;'>
+</div>
+
+<script>
+
+let S = {};
+let afterDraw = () => {}
+let beforeDraw = () => {}
+let code = {};
+let description = '';
+let onDrag = null, onMove = null, onPress = null, onRelease = null,
+    onKeyPress = null, onKeyRelease = null;
+let rooms = {};
+
+S.html = str => {
+   htmlValue[name] = str;
+}
+</script>
+
+<script src=js/lib3D.js></script>
+<script src=js/example3D.js></script>
+
+<SCRIPT>
+let matrixMultiply = function(a, b) {
+   let dst = [];
+   for (let n = 0 ; n < 16 ; n++)
+      dst.push( a[n&3     ] * b[n&12    ] +
+                a[n&3 |  4] * b[n&12 | 1] +
+                a[n&3 |  8] * b[n&12 | 2] +
+                a[n&3 | 12] * b[n&12 | 3] );
+   return dst;
+}
+
+let matrixInverse = function(src) {
+  let dst = [], det = 0, cofactor = (c, r) => {
+     let s = (i, j) => src[c+i & 3 | (r+j & 3) << 2];
+     return (c+r & 1 ? -1 : 1) * ( (s(1,1) * (s(2,2) * s(3,3) - s(3,2) * s(2,3)))
+                                 - (s(2,1) * (s(1,2) * s(3,3) - s(3,2) * s(1,3)))
+                                 + (s(3,1) * (s(1,2) * s(2,3) - s(2,2) * s(1,3))) );
+  }
+  for (let n = 0 ; n < 16 ; n++) dst.push(cofactor(n >> 2, n & 3));
+  for (let n = 0 ; n <  4 ; n++) det += src[n] * dst[n << 2];
+  for (let n = 0 ; n < 16 ; n++) dst[n] /= det;
+  return dst;
+}
+
+let current_code_name = '';
+let elapsed = 0;
+let error = null;
+let evalCodes = {};
+let htmlValue = {};
+let isInit = true;
+let name = '';
+let startTime = Date.now();
+let time = 0;
+let ballTime = 0;
+
+const btn = document.getElementById("restart");
+let setBall = () => {
+   ballTime = time;
+}
+
+let isEditing = () => current_code_name != '' && ! isHTML(current_code_name);
+
+let setHTML = () => {
+   htmlWindow.innerHTML = '<table bgcolor=#fffaf0 width=800 height=800><tr><td valign=top>'
+                          + '<font color=black face=helvetica size=5>'
+                          + htmlValue[current_code_name]
+                          + '</table>';
+}
+
+let chooseCode = code_name => {
+   current_code_name = code_name;
+   if (code_name != '') {
+      codeText.value = code[code_name];
+      evalCodes[code_name]();
+      if (isHTML(current_code_name))
+         setHTML();
+      else
+         htmlWindow.innerHTML = '';
+   }
+   codeWindow.style.zIndex = code_name && ! isHTML(code_name) ? 1 : -1;
+}
+
+codeText.onKeyDown = event => { }
+
+codeText.onKeyUp = event => {
+   let deleteChar = () => {
+      if (codeText.value.length > 0) {
+         let i = codeText.selectionStart;
+         codeText.value = codeText.value.substring(0, i-1) + codeText.value.substring(i, codeText.value.length);
+         codeText.selectionStart = codeText.selectionEnd = i-1;
+      }
+   }
+   switch (event.key) {
+   case '`':
+      deleteChar();
+      parseCodes();
+   }
+}
+
+let parseCodes = () => {
+   code[current_code_name] = codeText.value;
+   if (current_code_name == 'init')
+      isInit = true;
+   evalAllCodes();
+}
+
+let evalAllCodes = () => {
+   error = null;
+   for (name in code)
+      try {
+         evalCodes[name] = new Function(code[name]);
+      } catch (e) { error = e; }
+   showError();
+}
+
+let showError = () => {
+   errorWindow.innerHTML = error ? '<font color=cyan face=helvetica size=5>'
+                                   + error.name + ' ' + error.message
+                                   + '</font>'
+                                 : '';
+}
+
+let current_room = '';
+
+let isHTML = name => code[name].indexOf('S.html') >= 0;
+
+setInterval(() => {
+   let prevTime = time;
+   time = (Date.now() - startTime) / 1000;
+   elapsed = time - prevTime;
+
+   if (room_choice.value != current_room) {
+      delete myCanvas;
+      canvasWindow.innerHTML = '<canvas id=myCanvas width=400 height=400></canvas>'
+
+      current_room = room_choice.value;
+      rooms[current_room]();
+
+      chooseCode('');
+      isInit = true;
+      buttons.innerHTML = '';
+      isAllHTML = true;
+      for (name in code) {
+         let label = isHTML(name) ? name : 'edit ' + name;
+         buttons.innerHTML += '<button onclick="chooseCode(\'' + name + '\')">' + label + '</button> ';
+         if (! isHTML(name))
+            isAllHTML = false;
+      }
+      if (! isAllHTML) {
+         buttons.innerHTML += '<button onclick="parseCodes()">UPDATE</button> ';
+         buttons.innerHTML += '<button onclick="chooseCode(\'\')">INTERACT</button> ';
+         htmlWindow.innerHTML = '';
+      }
+      else
+	 for (name in code) {
+            evalCodes[name] = new Function(code[name]);
+	    evalCodes[name]();
+	    current_code_name = name;
+	    setHTML();
+	    break;
+         }
+
+      descriptionWindow.innerHTML = description;
+
+      evalAllCodes();
+   }
+
+   beforeDraw();
+   for (name in code)
+      if (name && (name != 'init' || isInit))
+         evalCodes[name]();
+   isInit = false;
+   afterDraw();
+   showError();
+
+}, 30);
+
+</SCRIPT>
+
